@@ -60,41 +60,41 @@ All paths added via `--add-folder` / `--add-xspf` are canonicalized (resolved to
 
 ### Normal Mode
 
-| Key | Action |
-|-----|--------|
-| `Space` | Play / Pause |
-| `n` / `p` | Next / Previous track |
-| `s` | Stop |
-| `←` / `→` | Seek -5s / +5s |
-| `+` / `-` | Volume up / down |
-| `m` | Cycle play mode (Seq → Shuffle → Repeat1 → RepeatAll) |
-| `Tab` | Cycle focus (Playlist → Lyrics → Library) |
-| `l` | Toggle Library panel |
-| `w` | Switch named playlist (XSPF imports) |
-| `Enter` | Play selected / Add to playlist / Seek lyric |
-| `a` | (Library) Add track to playlist |
-| `d` | (Playlist) Remove track from playlist |
-| `F2` | Open Settings |
-| `q` / `Esc` | Quit |
+| Key          | Action                                                       |
+| ------------ | ------------------------------------------------------------ |
+| `Space`      | Play / Pause                                                 |
+| `n` / `p`    | Next / Previous track                                        |
+| `s`          | Stop                                                         |
+| `←` / `→`    | Seek -5s / +5s                                               |
+| `+` / `-`    | Volume up / down                                             |
+| `m`          | Cycle play mode (Seq → Shuffle → Repeat1 → RepeatAll)        |
+| `Tab`        | Cycle focus (Playlist → Lyrics → Library)                     |
+| `l`          | Toggle Library panel                                         |
+| `w`          | Switch named playlist (XSPF imports)                         |
+| `Enter`      | Play selected / Add to playlist / Seek lyric                 |
+| `a`          | (Library) Add track to playlist                              |
+| `d`          | (Playlist) Remove track from playlist                        |
+| `F2`         | Open Settings                                                |
+| `q` / `Esc`  | Quit                                                         |
 
 ### Settings Mode
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch section (Folders / Playlists) |
-| `a` | Add music folder (type path → Enter) |
-| `i` | Import .xspf file (type path → Enter) |
-| `d` | Remove selected folder/playlist |
-| `l` | Toggle language (English / 中文) |
-| `Enter` | Rescan all configured sources |
-| `Esc` / `F2` | Back |
+| Key       | Action                                                    |
+| --------- | --------------------------------------------------------- |
+| `Tab`     | Switch section (Folders / Playlists)                       |
+| `a`       | Add music folder (type path → Enter)                       |
+| `i`       | Import .xspf file (type path → Enter)                      |
+| `d`       | Remove selected folder/playlist                            |
+| `l`       | Toggle language (English / 中文)                            |
+| `Enter`   | Rescan all configured sources                              |
+| `Esc`/`F2`| Back                                                      |
 
 ## File Locations
 
-| File | Path |
-|------|------|
-| Config | `%AppData%/tui-musicplayer/config.json` |
-| Log | `%AppData%/tui-musicplayer/logs/player_2026-05-25_08-30-00.log` |
+| File   | Path                                                              |
+| ------ | ----------------------------------------------------------------- |
+| Config | `%AppData%/tui-musicplayer/config.json`                           |
+| Log    | `%AppData%/tui-musicplayer/logs/player_2026-05-25_08-30-00.log`   |
 
 On Linux/macOS, `%AppData%` maps to `~/.local/share/` or `~/.config/`.
 
@@ -112,6 +112,33 @@ mp3, flac, ogg, wav, aiff, aif, m4a, aac, wma, opus, ape, wv, mpc
 - [roxmltree](https://crates.io/crates/roxmltree) — XSPF XML parsing
 - [serde](https://crates.io/crates/serde) + [serde_json](https://crates.io/crates/serde_json) — Config persistence
 - [log](https://crates.io/crates/log) + [simplelog](https://crates.io/crates/simplelog) — Logging
+
+## Known Issues
+
+_Audited 2026-05-25 — 14 source files, ~3500 lines of Rust._
+
+### Functional bugs
+
+- **High — Shuffle mode is not implemented.** `PlayMode::Shuffle` falls through to the same branch as `Sequential`, so tracks always play in insertion order. The `rand` crate is declared in `Cargo.toml` but never used. ([`playback.rs:163`](src/app/playback.rs#L163))
+- **Medium — LRC timestamps without milliseconds are silently dropped.** `parse_timestamp` requires a decimal point (`.`) in the bracket tag, but the LRC spec allows `[mm:ss]` without fractional seconds. LRC files using that format will never display lyrics. ([`lyrics.rs:54-65`](src/audio/lyrics.rs#L54-L65))
+- **Medium — `truncate` / `wrap_text` use char count, not terminal display width.** CJK characters are double-width in terminals but are counted as 1, causing text overflow in library, playlist, and lyrics panels. ([`ui/mod.rs:33`](src/ui/mod.rs#L33), [`panels.rs:253`](src/ui/panels.rs#L253))
+- **Low — Input buffer byte-index safety.** `String::remove()` is called with a char-position cursor — panics possible with multi-byte UTF-8 in path entry. ([`input.rs:53-63`](src/app/input.rs#L53-L63))
+- **Low — Windows XSPF path normalization is fragile.** Assumes specific byte layout (`/C:/…`) without validating the drive letter. ([`scan.rs:56-60`](src/audio/scan.rs#L56-L60))
+- **Low — `lyrics_state.select(Some(0))` called unconditionally** even when no LRC file was loaded. ([`playback.rs:89`](src/app/playback.rs#L89))
+- **Low — Audio metadata not populated until first play.** Bitrate, sample rate, and duration show `?` for unplayed tracks. ([`mod.rs:55-78`](src/audio/mod.rs#L55-L78))
+
+### Security notes
+
+- **Medium — XSPF URL decoding only handles `%20`.** Paths with other percent-encoded characters (`%23`, `%26`, etc.) fail to resolve. Not exploitable (paths only go to `rodio::Decoder`), but breaks library loading for files with special characters. ([`scan.rs:62`](src/audio/scan.rs#L62))
+- **Low — Config save errors silently discarded** in 7 locations. The user may believe settings were persisted when I/O actually failed. ([`mod.rs:390-604`](src/app/mod.rs))
+- **Low — Log file `File::create().unwrap()` can panic** on startup if the logs directory is unwritable. ([`main.rs:104`](src/main.rs#L104))
+- **Low — No base-directory confinement for XSPF paths.** A crafted XSPF could reference arbitrary filesystem paths (mitigated by extension filter and `rodio` decode failure). ([`scan.rs:43-71`](src/audio/scan.rs#L43-L71))
+
+### Dependency hygiene
+
+- `rand = "0.8"` declared but never imported (dead weight — tied to the missing shuffle implementation).
+- `roxmltree` is safe against XXE (no DTD/entity resolution).
+- The app makes no network requests and executes no shell commands — minimal attack surface.
 
 ## License
 
