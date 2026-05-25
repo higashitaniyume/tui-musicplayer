@@ -19,14 +19,18 @@ pub fn render_settings(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(block, area);
 
     let sections = Layout::vertical([
-        Constraint::Percentage(46),
-        Constraint::Percentage(46),
+        Constraint::Percentage(30),
+        Constraint::Percentage(30),
+        Constraint::Percentage(36),
+        Constraint::Length(1),
         Constraint::Length(1),
     ]).split(inner);
 
     render_folders_section(f, sections[0], app);
     render_xspf_section(f, sections[1], app);
-    render_language_line(f, sections[2], app);
+    render_devices_section(f, sections[2], app);
+    render_audio_host_line(f, sections[3], app);
+    render_language_line(f, sections[4], app);
 }
 
 fn render_folders_section(f: &mut Frame, area: Rect, app: &mut App) {
@@ -69,6 +73,44 @@ fn render_folders_section(f: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
+fn render_devices_section(f: &mut Frame, area: Rect, app: &mut App) {
+    let focused = app.settings_section == SettingsSection::Devices;
+    let current = app.config.audio_host.as_deref().unwrap_or("-");
+    let title_text = format!(" Audio Output [{}] ", if current == "-" { "default" } else { current });
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(border_style(focused))
+        .title(title_span(&title_text));
+    let inner = block.inner(area);
+    app.settings_device_inner = inner;
+    f.render_widget(block, area);
+
+    if app.audio_device_list.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled("No devices found", dim())).block(Block::new()),
+            inner,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = app.audio_device_list.iter().map(|(host, name, _current)| {
+        let is_current = Some(name.as_str()) == app.config.audio_host.as_deref();
+        let prefix = if is_current { "✓ " } else { "  " };
+        let txt = format!("{}{} [{}]", prefix, truncate(name, 40), host);
+        let s = if is_current { super::accent() } else { normal() };
+        ListItem::from(txt).style(s)
+    }).collect();
+
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::new())
+            .highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        inner,
+        &mut app.settings_device_state,
+    );
+}
+
 fn render_xspf_section(f: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.settings_section == SettingsSection::Playlists;
     let title_text = app.locale.xspf_playlists_title(app.config.xspf_playlists.len());
@@ -106,6 +148,19 @@ fn render_xspf_section(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
         inner,
         &mut app.settings_xspf_state,
+    );
+}
+
+fn render_audio_host_line(f: &mut Frame, area: Rect, app: &App) {
+    let current = app.config.audio_host.as_deref().unwrap_or("-");
+    let text = format!(
+        " {}: {}  |  Enter: select  Tab: switch section",
+        app.locale.audio_host_label(),
+        if current == "-" { "System Default" } else { current },
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(text, dim())),
+        area,
     );
 }
 

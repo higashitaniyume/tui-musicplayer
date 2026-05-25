@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::app::{App, Panel};
 use crate::audio::PlayerStatus;
-use super::{border_style, dim, normal, playing, title_span, truncate};
+use super::{border_style, dim, normal, playing, title_span, truncate, viz};
 
 // ═══════════════════════════════════════════════
 // Content router
@@ -153,9 +153,9 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &mut App) {
     };
 
     let right = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(4),
-        Constraint::Length(1),
+        Constraint::Length(2),   // track info
+        Constraint::Min(8),      // viz + lyrics
+        Constraint::Length(1),   // file badge
     ]).split(inner);
 
     f.render_widget(
@@ -166,12 +166,44 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &mut App) {
         right[0],
     );
 
-    render_lyrics_section(f, right[1], app);
+    // Split middle: visualization (top half) + lyrics (bottom half)
+    let middle = Layout::vertical([
+        Constraint::Ratio(2, 5),  // viz gets 2/5
+        Constraint::Ratio(3, 5),  // lyrics get 3/5
+    ]).split(right[1]);
+
+    render_viz_section(f, middle[0], app);
+    render_lyrics_section(f, middle[1], app);
 
     f.render_widget(
         Paragraph::new(Span::styled(track_badge, dim())),
         right[2],
     );
+}
+
+// ═══════════════════════════════════════════════
+// Visualization section
+// ═══════════════════════════════════════════════
+
+fn render_viz_section(f: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::new()
+        .borders(Borders::ALL).border_type(BorderType::Plain)
+        .border_style(dim())
+        .title(title_span(" ♪ "));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.width < 4 || inner.height < 3 {
+        return;
+    }
+
+    let elapsed = if app.status == PlayerStatus::Playing {
+        app.elapsed
+    } else {
+        std::time::Duration::ZERO
+    };
+
+    f.render_widget(viz::VizWidget { elapsed }, inner);
 }
 
 // ═══════════════════════════════════════════════

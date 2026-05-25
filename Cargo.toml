@@ -8,6 +8,7 @@ description = "A cross-platform terminal music player built with ratatui + rodio
 ratatui = "0.29"
 crossterm = "0.28"
 rodio = { version = "0.20", features = ["symphonia-all"] }
+cpal = "0.15"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 rand = "0.8"

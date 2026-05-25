@@ -43,6 +43,7 @@ pub(crate) struct FadeState {
 pub enum SettingsSection {
     Folders,
     Playlists,
+    Devices,
 }
 
 #[derive(Clone, PartialEq)]
@@ -106,8 +107,11 @@ pub struct App {
     pub settings_section: SettingsSection,
     pub settings_folder_state: ListState,
     pub settings_xspf_state: ListState,
+    pub settings_device_state: ListState,
     pub settings_folder_inner: Rect,
     pub settings_xspf_inner: Rect,
+    pub settings_device_inner: Rect,
+    pub audio_device_list: Vec<(String, String, bool)>, // (host_name, device_name, is_current)
 
     // ── Text input ──
     pub input_mode: InputMode,
@@ -119,7 +123,7 @@ pub struct App {
 
 impl App {
     pub fn new(paths: Vec<PathBuf>, mut config: Config, locale: Locale) -> anyhow::Result<Self> {
-        let player = PlayerEngine::new()?;
+        let player = PlayerEngine::new(config.audio_host.as_deref())?;
         let mut library = Vec::new();
 
         let search_paths: Vec<PathBuf> = if paths.is_empty() {
@@ -265,8 +269,11 @@ impl App {
             settings_section: SettingsSection::Folders,
             settings_folder_state: folder_state,
             settings_xspf_state: xspf_state,
+            settings_device_state: ListState::default(),
             settings_folder_inner: Rect::ZERO,
             settings_xspf_inner: Rect::ZERO,
+            settings_device_inner: Rect::ZERO,
+            audio_device_list: Vec::new(),
             input_mode: InputMode::Normal,
             saved_playlists,
             active_playlist_idx: None,
@@ -357,6 +364,57 @@ impl App {
 
     // ── Settings ──
 
+    pub fn refresh_audio_devices(&mut self) {
+        self.audio_device_list = crate::audio::available_devices(self.config.audio_host.as_deref());
+        // Print to stderr so user can see enumeration results immediately
+        if self.audio_device_list.is_empty() {
+            eprintln!("[audio] WARNING: no output devices found!");
+        } else {
+            eprintln!("[audio] {} device(s) enumerated:", self.audio_device_list.len());
+            for (host, name, current) in &self.audio_device_list {
+                eprintln!("  [{host}] {name} {}", if *current { "(current)" } else { "" });
+            }
+        }
+    }
+
+    pub fn select_audio_device(&mut self) {
+        let idx = match self.settings_device_state.selected() {
+            Some(i) if i < self.audio_device_list.len() => i,
+            _ => return,
+        };
+        let device_name = self.audio_device_list[idx].1.clone();
+        info!("Selecting audio device: {device_name}");
+        match self.player.restart_with_device(Some(&device_name)) {
+            Ok(()) => {
+                self.config.audio_host = Some(device_name.clone());
+                let _ = self.config.save();
+                self.status_message = self.locale.audio_host_changed(&device_name);
+                self.refresh_audio_devices();
+            }
+            Err(e) => {
+                warn!("Failed to switch audio device: {e}");
+                self.status_message = format!("Audio error: {e}");
+            }
+        }
+    }
+
+    pub fn reset_audio_device(&mut self) {
+        info!("Resetting audio to system default");
+        match self.player.restart_with_device(None) {
+            Ok(()) => {
+                self.config.audio_host = None;
+                let _ = self.config.save();
+                self.status_message = self.locale.audio_host_changed(
+                    &self.locale.audio_host_default().to_string());
+                self.refresh_audio_devices();
+            }
+            Err(e) => {
+                warn!("Failed to reset audio device: {e}");
+                self.status_message = format!("Audio error: {e}");
+            }
+        }
+    }
+
     pub fn toggle_language(&mut self) {
         use crate::locale::Lang;
         let new_lang = match self.locale.lang() {
@@ -380,6 +438,7 @@ impl App {
         self.show_settings = !self.show_settings;
         if self.show_settings {
             self.status_message = String::new();
+            self.refresh_audio_devices();
         }
     }
 
@@ -547,6 +606,7 @@ impl App {
                 }
                 self.status_message = self.locale.msg_xspf_removed().to_string();
             }
+            SettingsSection::Devices => {}
         }
     }
 

@@ -216,6 +216,21 @@ impl Locale {
     pub fn language_toggle_hint(&self) -> &str {
         match self.lang { Lang::En => "Toggle Lang", Lang::ZhCn => "切换语言" }
     }
+    pub fn audio_host_label(&self) -> &str {
+        match self.lang { Lang::En => "Audio Output", Lang::ZhCn => "音频输出" }
+    }
+    pub fn audio_host_default(&self) -> &str {
+        match self.lang { Lang::En => "System Default", Lang::ZhCn => "系统默认" }
+    }
+    pub fn audio_host_changed(&self, host: &str) -> String {
+        match self.lang {
+            Lang::En => format!("Audio output: {host}"),
+            Lang::ZhCn => format!("音频输出: {host}"),
+        }
+    }
+    pub fn audio_host_hint(&self) -> &str {
+        match self.lang { Lang::En => "Audio Host", Lang::ZhCn => "音频主机" }
+    }
 
     // ── Named playlists ──
     pub fn playlist_switched(&self, name: &str) -> String {

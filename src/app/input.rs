@@ -114,7 +114,8 @@ impl App {
                 KeyCode::Tab => {
                     self.settings_section = match self.settings_section {
                         SettingsSection::Folders => SettingsSection::Playlists,
-                        SettingsSection::Playlists => SettingsSection::Folders,
+                        SettingsSection::Playlists => SettingsSection::Devices,
+                        SettingsSection::Devices => SettingsSection::Folders,
                     };
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -127,6 +128,11 @@ impl App {
                         SettingsSection::Playlists => move_list(
                             &mut self.settings_xspf_state,
                             self.config.xspf_playlists.len(),
+                            -1,
+                        ),
+                        SettingsSection::Devices => move_list(
+                            &mut self.settings_device_state,
+                            self.audio_device_list.len(),
                             -1,
                         ),
                     }
@@ -143,25 +149,33 @@ impl App {
                             self.config.xspf_playlists.len(),
                             1,
                         ),
+                        SettingsSection::Devices => move_list(
+                            &mut self.settings_device_state,
+                            self.audio_device_list.len(),
+                            1,
+                        ),
                     }
                 }
-                KeyCode::Char('a') => {
+                KeyCode::Char('a') if self.settings_section != SettingsSection::Devices => {
                     self.input_mode = InputMode::EnteringPath {
                         buffer: String::new(),
                         cursor: 0,
                         purpose: super::PathPurpose::AddMusicFolder,
                     };
                 }
-                KeyCode::Char('i') => {
+                KeyCode::Char('i') if self.settings_section != SettingsSection::Devices => {
                     self.input_mode = InputMode::EnteringPath {
                         buffer: String::new(),
                         cursor: 0,
                         purpose: super::PathPurpose::ImportXspf,
                     };
                 }
-                KeyCode::Char('d') => self.remove_settings_item(),
+                KeyCode::Char('d') if self.settings_section != SettingsSection::Devices => self.remove_settings_item(),
                 KeyCode::Char('l') => self.toggle_language(),
-                KeyCode::Enter => self.rescan_all(),
+                KeyCode::Enter => match self.settings_section {
+                    SettingsSection::Devices => self.select_audio_device(),
+                    _ => self.rescan_all(),
+                },
                 _ => {}
             }
             return;

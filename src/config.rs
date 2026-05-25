@@ -13,6 +13,9 @@ pub struct Config {
     /// "en" or "zh" — None means auto-detect from environment
     #[serde(default)]
     pub language: Option<String>,
+    /// Audio host name (e.g. "WASAPI", "DirectSound") — None means system default
+    #[serde(default)]
+    pub audio_host: Option<String>,
 }
 
 impl Config {
@@ -62,6 +65,7 @@ impl Default for Config {
             music_folders: Vec::new(),
             xspf_playlists: Vec::new(),
             language: None,
+            audio_host: None,
         }
     }
 }

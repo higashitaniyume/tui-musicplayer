@@ -140,6 +140,7 @@ fn render_key_hints(f: &mut Frame, area: Rect, app: &App) {
         let add_label = match app.settings_section {
             crate::app::SettingsSection::Folders => loc.settings_hint_add_folder(),
             crate::app::SettingsSection::Playlists => loc.settings_hint_import_xspf(),
+            crate::app::SettingsSection::Devices => "",
         };
         f.render_widget(
             Paragraph::new(Line::from(vec![
@@ -151,6 +152,8 @@ fn render_key_hints(f: &mut Frame, area: Rect, app: &App) {
                 hl(" D "), Span::styled(loc.settings_hint_remove(), normal()),
                 Span::styled("  ", dim()),
                 hl(" L "), Span::styled(loc.language_toggle_hint(), normal()),
+                Span::styled("  ", dim()),
+                hl(" H "), Span::styled(loc.audio_host_hint(), normal()),
                 Span::styled("  ", dim()),
                 hl(" Enter "), Span::styled(loc.settings_hint_rescan(), normal()),
                 Span::styled("  ", dim()),

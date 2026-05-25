@@ -6,6 +6,7 @@ use ratatui::{
 pub mod layout;
 pub mod panels;
 pub mod settings;
+pub mod viz;
 
 pub use layout::render;
 
