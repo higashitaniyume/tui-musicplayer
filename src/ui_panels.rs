@@ -1,0 +1,210 @@
+use ratatui::{
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
+    Frame,
+};
+
+use crate::app::{App, Panel};
+use crate::player::PlayerStatus;
+use crate::ui::{self, border_style, dim, normal, playing, title_span};
+
+// ═══════════════════════════════════════════════
+// Content router
+// ═══════════════════════════════════════════════
+
+pub fn render_content(f: &mut Frame, area: Rect, app: &mut App) {
+    if app.library_visible {
+        let cols = Layout::horizontal([
+            Constraint::Percentage(20),
+            Constraint::Percentage(25),
+            Constraint::Percentage(55),
+        ]).split(area);
+        render_library(f, cols[0], app);
+        render_playlist(f, cols[1], app);
+        render_right_panel(f, cols[2], app);
+    } else {
+        let cols = Layout::horizontal([
+            Constraint::Percentage(40),
+            Constraint::Percentage(60),
+        ]).split(area);
+        render_playlist(f, cols[0], app);
+        render_right_panel(f, cols[1], app);
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Library
+// ═══════════════════════════════════════════════
+
+fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
+    let focused = app.focus == Panel::Library;
+    let title = app.locale.library_title(app.library_count());
+    let block = Block::new()
+        .borders(Borders::ALL).border_type(BorderType::Rounded)
+        .border_style(border_style(focused))
+        .title(title_span(&title));
+    app.library_inner = block.inner(area);
+
+    if app.library.is_empty() {
+        f.render_widget(
+            List::new(vec![ListItem::from(Span::styled(app.locale.no_tracks_hint(), dim()))]).block(block),
+            area,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = app.library.iter().enumerate().map(|(i, t)| {
+        let in_pl = app.playlist.contains(&i);
+        let txt = format!("{}{:3}. {}", if in_pl { "✓" } else { " " }, i + 1, ui::truncate(&t.display_title(), 15));
+        ListItem::from(txt).style(normal())
+    }).collect();
+
+    f.render_stateful_widget(
+        List::new(items).block(block).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        area, app.library_state_mut(),
+    );
+}
+
+// ═══════════════════════════════════════════════
+// Playlist
+// ═══════════════════════════════════════════════
+
+fn render_playlist(f: &mut Frame, area: Rect, app: &mut App) {
+    let focused = app.focus == Panel::Playlist;
+    let title = app.locale.playlist_title(app.playlist_count());
+    let block = Block::new()
+        .borders(Borders::ALL).border_type(BorderType::Rounded)
+        .border_style(border_style(focused))
+        .title(title_span(&title));
+    app.playlist_inner = block.inner(area);
+
+    if app.playlist.is_empty() {
+        f.render_widget(
+            List::new(vec![ListItem::from(Span::styled(app.locale.playlist_empty_hint(), dim()))]).block(block),
+            area,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = app.playlist.iter().enumerate().map(|(pi, &li)| {
+        let is_current = app.current_index == Some(li);
+        let prefix = if is_current {
+            match app.status {
+                PlayerStatus::Playing => "▶",
+                PlayerStatus::Paused => "⏸",
+                PlayerStatus::Stopped => "■",
+            }
+        } else { " " };
+        let t = &app.library[li];
+        let txt = format!("{}{:2}. {}", prefix, pi + 1, ui::truncate(&t.display_title(), 18));
+        let s = if is_current { playing() } else { normal() };
+        ListItem::from(txt).style(s)
+    }).collect();
+
+    f.render_stateful_widget(
+        List::new(items).block(block).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        area, app.playlist_state_mut(),
+    );
+}
+
+// ═══════════════════════════════════════════════
+// Right panel: Track Info + Lyrics + File badge
+// ═══════════════════════════════════════════════
+
+fn render_right_panel(f: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::new()
+        .borders(Borders::ALL).border_type(BorderType::Rounded)
+        .border_style(dim())
+        .title(title_span(" Now Playing "));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if app.current_track().is_none() {
+        f.render_widget(
+            Paragraph::new(Span::styled(app.locale.info_no_track(), dim())).alignment(Alignment::Center),
+            inner,
+        );
+        return;
+    }
+
+    // Snapshot track info before mutable borrow for lyrics
+    let (track_title, track_subtitle, track_badge) = {
+        let t = app.current_track().unwrap();
+        let title = t.title.clone();
+        let subtitle = if t.artist.is_empty() {
+            t.file_stem()
+        } else {
+            format!("{} · {}", t.artist, t.album)
+        };
+        let badge = format!(
+            "{} · {} · {} · {} │ {}",
+            t.format,
+            t.bitrate.map(|b| format!("{b} kbps")).unwrap_or_else(|| "?".into()),
+            t.sample_rate.map(|s| format!("{s} Hz")).unwrap_or_else(|| "?".into()),
+            t.format_size(),
+            t.format_duration(),
+        );
+        (title, subtitle, badge)
+    };
+
+    let right = Layout::vertical([
+        Constraint::Length(2),  // track info
+        Constraint::Min(4),     // lyrics
+        Constraint::Length(1),  // file badge
+    ]).split(inner);
+
+    f.render_widget(
+        Paragraph::new(Text::from(vec![
+            Line::from(Span::styled(ui::truncate(&track_title, 42), Style::new().fg(Color::White).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(track_subtitle, normal())),
+        ])),
+        right[0],
+    );
+
+    render_lyrics_section(f, right[1], app);
+
+    f.render_widget(
+        Paragraph::new(Span::styled(track_badge, dim())),
+        right[2],
+    );
+}
+
+// ═══════════════════════════════════════════════
+// Lyrics section
+// ═══════════════════════════════════════════════
+
+fn render_lyrics_section(f: &mut Frame, area: Rect, app: &mut App) {
+    let focused = app.focus == Panel::Lyrics;
+    let block = Block::new()
+        .borders(Borders::ALL).border_type(BorderType::Plain)
+        .border_style(border_style(focused))
+        .title(title_span(app.locale.lyrics_title()));
+    let inner = block.inner(area);
+    app.lyrics_inner = inner;
+    f.render_widget(block, area);
+
+    if app.lyrics.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled(app.locale.no_lyrics(), dim())).alignment(Alignment::Center),
+            inner,
+        );
+        return;
+    }
+
+    let playing_idx = app.current_lyric_index;
+    let items: Vec<ListItem> = app.lyrics.iter().enumerate().map(|(i, l)| {
+        let ts = ui::format_duration(l.timestamp);
+        let txt = format!("{ts}  {}", ui::truncate(&l.text, 48));
+        let s = if Some(i) == playing_idx {
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else { dim() };
+        ListItem::from(txt).style(s)
+    }).collect();
+
+    f.render_stateful_widget(
+        List::new(items).block(Block::new()).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        inner, app.lyrics_state_mut(),
+    );
+}
