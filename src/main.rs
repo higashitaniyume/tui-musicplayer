@@ -14,14 +14,10 @@ use ratatui::Terminal;
 use simplelog::{CombinedLogger, ConfigBuilder, WriteLogger};
 
 mod app;
-mod app_input;
-mod app_playback;
+mod audio;
 mod config;
 mod locale;
-mod player;
 mod ui;
-mod ui_panels;
-mod ui_settings;
 
 use config::Config;
 use locale::{detect_locale, Lang, Locale};

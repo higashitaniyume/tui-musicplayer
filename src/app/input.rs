@@ -5,7 +5,7 @@ use crossterm::event::{
 };
 use ratatui::layout::Rect;
 
-use crate::app::{move_list, select_at, App, InputMode, Panel, SettingsSection};
+use super::{move_list, select_at, App, InputMode, Panel, SettingsSection};
 
 impl App {
     // ── Keyboard ──
@@ -24,8 +24,8 @@ impl App {
                     let purpose_clone = purpose.clone();
                     self.input_mode = InputMode::Normal;
                     match purpose_clone {
-                        crate::app::PathPurpose::AddMusicFolder => self.add_music_folder(path),
-                        crate::app::PathPurpose::ImportXspf => self.import_xspf_file(path),
+                        super::PathPurpose::AddMusicFolder => self.add_music_folder(path),
+                        super::PathPurpose::ImportXspf => self.import_xspf_file(path),
                     }
                 }
                 KeyCode::Char(c) => {
@@ -149,14 +149,14 @@ impl App {
                     self.input_mode = InputMode::EnteringPath {
                         buffer: String::new(),
                         cursor: 0,
-                        purpose: crate::app::PathPurpose::AddMusicFolder,
+                        purpose: super::PathPurpose::AddMusicFolder,
                     };
                 }
                 KeyCode::Char('i') => {
                     self.input_mode = InputMode::EnteringPath {
                         buffer: String::new(),
                         cursor: 0,
-                        purpose: crate::app::PathPurpose::ImportXspf,
+                        purpose: super::PathPurpose::ImportXspf,
                     };
                 }
                 KeyCode::Char('d') => self.remove_settings_item(),
@@ -203,9 +203,9 @@ impl App {
     }
 
     fn request_quit(&mut self) {
-        use crate::player::PlayerStatus;
+        use crate::audio::PlayerStatus;
         if self.status == PlayerStatus::Playing {
-            self.start_fade(crate::app::FadeAction::Quit, self.volume, 0.0, 300);
+            self.start_fade(super::FadeAction::Quit, self.volume, 0.0, 300);
         } else if self.status == PlayerStatus::Paused {
             self.player.stop();
             self.status = PlayerStatus::Stopped;
@@ -322,7 +322,6 @@ impl App {
     }
 
     fn handle_click(&mut self, pos: ratatui::layout::Position) {
-        // Settings mode: only handle clicks on settings lists + progress/volume bars
         if self.show_settings {
             if self.settings_folder_inner.contains(pos) {
                 self.settings_section = SettingsSection::Folders;
@@ -331,7 +330,6 @@ impl App {
                 self.settings_section = SettingsSection::Playlists;
                 select_at(&mut self.settings_xspf_state, &self.settings_xspf_inner, pos.y, self.config.xspf_playlists.len());
             }
-            // Still allow progress/volume bar interaction
             self.handle_bar_clicks(pos);
             return;
         }

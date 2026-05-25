@@ -5,12 +5,15 @@ use std::time::{Duration, Instant};
 use log::{debug, info, warn};
 use ratatui::{layout::Rect, widgets::ListState};
 
-use crate::config::Config;
-use crate::locale::Locale;
-use crate::player::{
+use crate::audio::{
     is_audio_file, parse_xspf, scan_directory, AudioMeta, LyricLine, PlayMode,
     PlayerEngine, PlayerStatus, Track,
 };
+use crate::config::Config;
+use crate::locale::Locale;
+
+pub mod input;
+pub mod playback;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Panel {
@@ -85,7 +88,7 @@ pub struct App {
     pub library_state: ListState,
     pub playlist_state: ListState,
     pub lyrics_state: ListState,
-    pub lyric_line_map: Vec<usize>, // physical line idx → logical lyric idx
+    pub lyric_line_map: Vec<usize>,
 
     pub library_inner: Rect,
     pub playlist_inner: Rect,
@@ -111,7 +114,7 @@ pub struct App {
 
     // ── Named playlists ──
     pub saved_playlists: Vec<(String, Vec<usize>)>,
-    pub active_playlist_idx: Option<usize>, // None = All Tracks
+    pub active_playlist_idx: Option<usize>,
 }
 
 impl App {
@@ -119,7 +122,6 @@ impl App {
         let player = PlayerEngine::new()?;
         let mut library = Vec::new();
 
-        // If no CLI paths given, use configured folders and XSPF playlists
         let search_paths: Vec<PathBuf> = if paths.is_empty() {
             let mut p = Vec::new();
             for folder in &config.music_folders {
@@ -129,18 +131,14 @@ impl App {
                 p.push(xspf.clone());
             }
             if p.is_empty() {
-                // Fall back to system music dir
                 vec![system_music_dir()]
             } else {
                 p
             }
         } else {
-            // CLI paths take priority; also add to config for persistence
-            // (we don't auto-add CLI paths to config — user adds explicitly via settings)
             paths
         };
 
-        // Track which paths came from which XSPF (ordered) for named playlist creation
         let mut seen_paths: HashSet<PathBuf> = HashSet::new();
         let mut xspf_imports: Vec<(String, Vec<PathBuf>)> = Vec::new();
 
@@ -156,7 +154,7 @@ impl App {
                     Ok(files) => {
                         for f in files {
                             if is_audio_file(&f) {
-                                ordered_paths.push(f.clone()); // always track for playlist order
+                                ordered_paths.push(f.clone());
                                 if !seen_paths.contains(&f) {
                                     seen_paths.insert(f.clone());
                                     library.push(Track::from_path(f));
@@ -189,14 +187,12 @@ impl App {
             a.file_stem().to_lowercase().cmp(&b.file_stem().to_lowercase())
         });
 
-        // Build path→index map for quick lookup after sorting
-        let path_to_idx: std::collections::HashMap<&PathBuf, usize> = library.iter().enumerate()
+        let path_to_idx: HashMap<&PathBuf, usize> = library.iter().enumerate()
             .map(|(i, t)| (&t.path, i))
             .collect();
 
         let playlist: Vec<usize> = (0..library.len()).collect();
 
-        // Build named playlists from XSPF imports preserving original order
         let mut saved_playlists: Vec<(String, Vec<usize>)> = Vec::new();
         for (name, ordered_paths) in &xspf_imports {
             let indices: Vec<usize> = ordered_paths.iter()
@@ -217,7 +213,6 @@ impl App {
             pl_state.select(Some(0));
         }
 
-        // If config has no folders yet, seed with system music dir
         if config.music_folders.is_empty() && !search_paths.is_empty() {
             for p in &search_paths {
                 if p.is_dir() {
@@ -307,7 +302,6 @@ impl App {
         self.update_elapsed();
         self.update_lyric_index();
 
-        // Auto-scroll lyrics
         if self.focus == Panel::Lyrics {
             let current_logical = self.lyrics_state.selected()
                 .and_then(|phys| self.lyric_line_map.get(phys).copied());
@@ -315,7 +309,6 @@ impl App {
                 self.lyrics_idle_ticks += 1;
                 if self.lyrics_idle_ticks > 30 {
                     if let Some(idx) = self.current_lyric_index {
-                        // Find first physical line belonging to this logical lyric
                         if let Some(phys) = self.lyric_line_map.iter().position(|&log| log == idx) {
                             self.lyrics_state.select(Some(phys));
                         }
@@ -449,14 +442,12 @@ impl App {
         match parse_xspf(&path) {
             Ok(files) => {
                 info!("Parsed XSPF '{}': {} file references", name, files.len());
-                // Preserve XSPF order for the named playlist
                 let ordered_paths: Vec<PathBuf> = files
                     .into_iter()
                     .filter(|f| is_audio_file(f))
                     .collect();
                 let tracks: Vec<Track> = ordered_paths.iter().map(|f| Track::from_path(f.clone())).collect();
                 self.merge_tracks(tracks);
-                // Build index list preserving XSPF order
                 let path_to_idx: HashMap<&PathBuf, usize> = self.library.iter().enumerate()
                     .map(|(i, t)| (&t.path, i))
                     .collect();

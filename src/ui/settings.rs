@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{App, SettingsSection};
-use crate::ui::{self, border_style, dim, normal, title_span};
+use super::{border_style, dim, normal, title_span, truncate};
 
 pub fn render_settings(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::new()
@@ -27,19 +27,6 @@ pub fn render_settings(f: &mut Frame, area: Rect, app: &mut App) {
     render_folders_section(f, sections[0], app);
     render_xspf_section(f, sections[1], app);
     render_language_line(f, sections[2], app);
-}
-
-fn render_language_line(f: &mut Frame, area: Rect, app: &App) {
-    let text = format!(
-        " {}: {}  |  L {}",
-        app.locale.language_label(),
-        app.locale.language_value(),
-        app.locale.language_toggle_hint(),
-    );
-    f.render_widget(
-        Paragraph::new(Span::styled(text, dim())),
-        area,
-    );
 }
 
 fn render_folders_section(f: &mut Frame, area: Rect, app: &mut App) {
@@ -68,7 +55,7 @@ fn render_folders_section(f: &mut Frame, area: Rect, app: &mut App) {
         .music_folders
         .iter()
         .map(|p| {
-            let txt = ui::truncate(&p.display().to_string(), 60);
+            let txt = truncate(&p.display().to_string(), 60);
             ListItem::from(txt).style(normal())
         })
         .collect();
@@ -108,7 +95,7 @@ fn render_xspf_section(f: &mut Frame, area: Rect, app: &mut App) {
         .xspf_playlists
         .iter()
         .map(|p| {
-            let txt = ui::truncate(&p.display().to_string(), 60);
+            let txt = truncate(&p.display().to_string(), 60);
             ListItem::from(txt).style(normal())
         })
         .collect();
@@ -119,6 +106,19 @@ fn render_xspf_section(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
         inner,
         &mut app.settings_xspf_state,
+    );
+}
+
+fn render_language_line(f: &mut Frame, area: Rect, app: &App) {
+    let text = format!(
+        " {}: {}  |  L {}",
+        app.locale.language_label(),
+        app.locale.language_value(),
+        app.locale.language_toggle_hint(),
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(text, dim())),
+        area,
     );
 }
 

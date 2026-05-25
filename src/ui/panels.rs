@@ -7,8 +7,8 @@ use ratatui::{
 };
 
 use crate::app::{App, Panel};
-use crate::player::PlayerStatus;
-use crate::ui::{self, border_style, dim, normal, playing, title_span};
+use crate::audio::PlayerStatus;
+use super::{border_style, dim, normal, playing, title_span, truncate};
 
 // ═══════════════════════════════════════════════
 // Content router
@@ -57,7 +57,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
 
     let items: Vec<ListItem> = app.library.iter().enumerate().map(|(i, t)| {
         let in_pl = app.playlist.contains(&i);
-        let txt = format!("{}{:3}. {}", if in_pl { "✓" } else { " " }, i + 1, ui::truncate(&t.display_title(), 15));
+        let txt = format!("{}{:3}. {}", if in_pl { "✓" } else { " " }, i + 1, truncate(&t.display_title(), 15));
         ListItem::from(txt).style(normal())
     }).collect();
 
@@ -102,7 +102,7 @@ fn render_playlist(f: &mut Frame, area: Rect, app: &mut App) {
             }
         } else { " " };
         let t = &app.library[li];
-        let txt = format!("{}{:2}. {}", prefix, pi + 1, ui::truncate(&t.display_title(), 18));
+        let txt = format!("{}{:2}. {}", prefix, pi + 1, truncate(&t.display_title(), 18));
         let s = if is_current { playing() } else { normal() };
         ListItem::from(txt).style(s)
     }).collect();
@@ -133,7 +133,6 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    // Snapshot track info before mutable borrow for lyrics
     let (track_title, track_subtitle, track_badge) = {
         let t = app.current_track().unwrap();
         let title = t.title.clone();
@@ -154,14 +153,14 @@ fn render_right_panel(f: &mut Frame, area: Rect, app: &mut App) {
     };
 
     let right = Layout::vertical([
-        Constraint::Length(2),  // track info
-        Constraint::Min(4),     // lyrics
-        Constraint::Length(1),  // file badge
+        Constraint::Length(2),
+        Constraint::Min(4),
+        Constraint::Length(1),
     ]).split(inner);
 
     f.render_widget(
         Paragraph::new(Text::from(vec![
-            Line::from(Span::styled(ui::truncate(&track_title, 42), Style::new().fg(Color::White).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(truncate(&track_title, 42), Style::new().fg(Color::White).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled(track_subtitle, normal())),
         ])),
         right[0],
@@ -228,12 +227,11 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
             lines.push(remaining.to_string());
             break;
         }
-        // Find a good break point within max_width
         let mut split = max_width;
         let mut found_space = false;
         for (j, c) in remaining.char_indices() {
             if j >= max_width { break; }
-            if c == ' ' || c == '\u{3000}' { // space or fullwidth space
+            if c == ' ' || c == '\u{3000}' {
                 split = j;
                 found_space = true;
             }

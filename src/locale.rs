@@ -73,8 +73,8 @@ impl Locale {
         }
     }
 
-    pub fn mode_name(&self, mode: &crate::player::PlayMode) -> &str {
-        use crate::player::PlayMode;
+    pub fn mode_name(&self, mode: &crate::audio::PlayMode) -> &str {
+        use crate::audio::PlayMode;
         match self.lang {
             Lang::En => match mode {
                 PlayMode::Sequential => "Seq",

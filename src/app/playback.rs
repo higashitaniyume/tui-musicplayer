@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use log::{debug, info, warn};
 
-use crate::app::{App, FadeAction, FadeState};
-use crate::player::{parse_lrc, PlayMode, PlayerStatus};
+use super::{App, FadeAction, FadeState};
+use crate::audio::{parse_lrc, PlayMode, PlayerStatus};
 
 impl App {
     // ── Fade ──
@@ -132,7 +132,7 @@ impl App {
                 self.start_fade(FadeAction::None, 0.0, self.volume, 250);
             }
             PlayerStatus::Stopped => {
-                if self.focus == crate::app::Panel::Playlist { self.play_selected(); }
+                if self.focus == super::Panel::Playlist { self.play_selected(); }
             }
         }
     }

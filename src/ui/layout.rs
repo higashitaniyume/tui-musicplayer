@@ -1,31 +1,14 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph},
     Frame,
 };
 
 use crate::app::App;
-use crate::ui_panels;
-use crate::ui_settings;
-
-const ACCENT: Color = Color::Cyan;
-const BG_DARK: Color = Color::Rgb(20, 20, 40);
-const BG_HINT: Color = Color::Rgb(30, 30, 50);
-
-const fn title_style() -> Style { Style::new().fg(Color::White).add_modifier(Modifier::BOLD) }
-pub(crate) fn normal() -> Style { Style::new().fg(Color::Gray) }
-pub(crate) fn dim() -> Style { Style::new().fg(Color::DarkGray) }
-pub(crate) fn accent() -> Style { Style::new().fg(ACCENT) }
-pub(crate) fn playing() -> Style { Style::new().fg(Color::Green) }
-pub(crate) fn paused() -> Style { Style::new().fg(Color::Yellow) }
-pub(crate) fn border_style(focused: bool) -> Style { Style::new().fg(if focused { ACCENT } else { Color::DarkGray }) }
-pub(crate) fn title_span(text: &str) -> Span<'_> { Span::styled(text, accent().add_modifier(Modifier::BOLD)) }
-
-// ═══════════════════════════════════════
-// Main layout
-// ═══════════════════════════════════════
+use super::{BG_DARK, BG_HINT, accent, dim, normal, playing, paused};
+use super::{format_duration, settings, panels};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
@@ -39,19 +22,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_title(f, main[0]);
 
     if app.show_settings {
-        ui_settings::render_settings(f, main[1], app);
+        settings::render_settings(f, main[1], app);
     } else {
-        ui_panels::render_content(f, main[1], app);
+        panels::render_content(f, main[1], app);
     }
 
     render_player_bar(f, main[2], app);
 
-    // Show input bar as overlay when entering text, otherwise key hints
     if matches!(app.input_mode, crate::app::InputMode::EnteringPath { .. }) {
-        // Overlay input bar on top of content area (bottom portion)
         let input_area = centered_rect(main[1], 60, 5);
-        ui_settings::render_input_bar(f, input_area, app);
-        // Still render key hints area as empty to maintain layout
+        settings::render_input_bar(f, input_area, app);
         f.render_widget(
             Paragraph::new("").block(Block::new().style(Style::new().bg(BG_HINT))),
             main[3],
@@ -71,7 +51,7 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
 
 fn render_title(f: &mut Frame, area: Rect) {
     let t = Line::from(vec![
-        Span::styled(" tui-musicplayer ", title_style()),
+        Span::styled(" tui-musicplayer ", super::title_style()),
         Span::styled("v0.1.0", dim()),
     ]);
     f.render_widget(
@@ -85,10 +65,9 @@ fn render_title(f: &mut Frame, area: Rect) {
 // ═══════════════════════════════════════
 
 fn render_player_bar(f: &mut Frame, area: Rect, app: &mut App) {
-    use crate::player::PlayerStatus;
+    use crate::audio::PlayerStatus;
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
-    // Row 1: Status + progress
     let status = match app.status {
         PlayerStatus::Playing => Span::styled(format!("▶ {}", app.locale.playing()), playing()),
         PlayerStatus::Paused => Span::styled(format!("⏸ {}", app.locale.paused()), paused()),
@@ -117,7 +96,6 @@ fn render_player_bar(f: &mut Frame, area: Rect, app: &mut App) {
         rows[0],
     );
 
-    // Row 2: Controls
     let vol_bar = render_volume_bar(app.volume, 16);
     let vol_pct = (app.volume * 100.0) as u32;
     let seek_label = match app.focus {
@@ -156,7 +134,7 @@ fn render_player_bar(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_key_hints(f: &mut Frame, area: Rect, app: &App) {
     let loc = &app.locale;
-    let hl = |s| Span::styled(s, Style::new().fg(Color::Black).bg(ACCENT));
+    let hl = |s| Span::styled(s, Style::new().fg(Color::Black).bg(super::ACCENT));
 
     if app.show_settings {
         let add_label = match app.settings_section {
@@ -207,19 +185,6 @@ fn render_key_hints(f: &mut Frame, area: Rect, app: &App) {
         ])).block(Block::new().style(Style::new().bg(BG_HINT))),
         area,
     );
-}
-
-// ═══════════════════════════════════════
-// Shared helpers
-// ═══════════════════════════════════════
-
-pub fn format_duration(d: std::time::Duration) -> String {
-    let total = d.as_secs();
-    format!("{:02}:{:02}", total / 60, total % 60)
-}
-
-pub fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() > max { format!("{}…", s.chars().take(max - 1).collect::<String>()) } else { s.to_string() }
 }
 
 fn render_volume_bar(volume: f32, width: usize) -> String {
