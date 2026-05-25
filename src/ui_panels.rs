@@ -73,7 +73,11 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_playlist(f: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Panel::Playlist;
-    let title = app.locale.playlist_title(app.playlist_count());
+    let title = match app.active_playlist_idx {
+        Some(idx) if idx < app.saved_playlists.len() =>
+            app.locale.playlist_title_named(&app.saved_playlists[idx].0, app.playlist_count()),
+        _ => app.locale.playlist_title(app.playlist_count()),
+    };
     let block = Block::new()
         .borders(Borders::ALL).border_type(BorderType::Rounded)
         .border_style(border_style(focused))
@@ -194,17 +198,57 @@ fn render_lyrics_section(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     let playing_idx = app.current_lyric_index;
-    let items: Vec<ListItem> = app.lyrics.iter().enumerate().map(|(i, l)| {
-        let ts = ui::format_duration(l.timestamp);
-        let txt = format!("{ts}  {}", ui::truncate(&l.text, 48));
+    let max_width = inner.width.max(1) as usize;
+    let mut items: Vec<ListItem> = Vec::new();
+    app.lyric_line_map.clear();
+
+    for (i, l) in app.lyrics.iter().enumerate() {
+        let wrapped = wrap_text(&l.text, max_width.saturating_sub(2));
         let s = if Some(i) == playing_idx {
             Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
         } else { dim() };
-        ListItem::from(txt).style(s)
-    }).collect();
+        for line in wrapped {
+            items.push(ListItem::from(line).style(s));
+            app.lyric_line_map.push(i);
+        }
+    }
 
     f.render_stateful_widget(
         List::new(items).block(Block::new()).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
         inner, app.lyrics_state_mut(),
     );
+}
+
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 { return vec![text.to_string()]; }
+    let mut lines = Vec::new();
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        if remaining.chars().count() <= max_width {
+            lines.push(remaining.to_string());
+            break;
+        }
+        // Find a good break point within max_width
+        let mut split = max_width;
+        let mut found_space = false;
+        for (j, c) in remaining.char_indices() {
+            if j >= max_width { break; }
+            if c == ' ' || c == '\u{3000}' { // space or fullwidth space
+                split = j;
+                found_space = true;
+            }
+        }
+        if !found_space {
+            split = remaining
+                .char_indices()
+                .take(max_width)
+                .last()
+                .map(|(j, _)| j + 1)
+                .unwrap_or(max_width);
+        }
+        let (first, rest) = remaining.split_at(split);
+        lines.push(first.trim_end().to_string());
+        remaining = rest.trim_start();
+    }
+    lines
 }

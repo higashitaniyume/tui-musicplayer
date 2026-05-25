@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use log::{debug, info, warn};
+
 use crate::app::{App, FadeAction, FadeState};
 use crate::player::{parse_lrc, PlayMode, PlayerStatus};
 
@@ -7,6 +9,7 @@ impl App {
     // ── Fade ──
 
     pub(crate) fn start_fade(&mut self, action: FadeAction, from: f32, to: f32, ms: u64) {
+        debug!("Fade: from {:.0}% to {:.0}% over {ms}ms", from * 100.0, to * 100.0);
         self.fade = Some(FadeState {
             action, from_vol: from, to_vol: to,
             start: Instant::now(),
@@ -29,20 +32,24 @@ impl App {
             self.player.set_volume(f.to_vol);
             match f.action {
                 FadeAction::Pause => {
+                    debug!("Fade complete: pause");
                     if let Some(start) = self.play_start.take() { self.accumulated += start.elapsed(); }
                     self.player.pause();
                     self.status = PlayerStatus::Paused;
                 }
                 FadeAction::Stop => {
+                    debug!("Fade complete: stop");
                     self.player.stop();
                     self.status = PlayerStatus::Stopped;
                     self.reset_timing();
                 }
                 FadeAction::LoadTrack(idx) => {
+                    debug!("Fade complete: load track index={idx}");
                     self.player.stop();
                     self.do_play_track(idx, true);
                 }
                 FadeAction::Quit => {
+                    debug!("Fade complete: quit");
                     self.player.stop();
                     self.status = PlayerStatus::Stopped;
                     self.reset_timing();
@@ -69,10 +76,15 @@ impl App {
 
     fn do_play_track(&mut self, lib_idx: usize, fade_in: bool) {
         if lib_idx >= self.library.len() { return; }
+        let track = &self.library[lib_idx];
+        info!("Playing track [{}]: {} - {}", lib_idx, track.display_title(), track.path.display());
         self.fade = None;
         self.player.stop();
         self.reset_timing();
         self.lyrics = parse_lrc(&self.library[lib_idx].path).unwrap_or_default();
+        if !self.lyrics.is_empty() {
+            debug!("  Lyrics: {} lines loaded", self.lyrics.len());
+        }
         self.current_lyric_index = None;
         self.lyrics_state.select(Some(0));
 
@@ -100,6 +112,7 @@ impl App {
                 self.track_meta = Some(meta);
             }
             Err(e) => {
+                warn!("Failed to play track {}: {e}", self.library[lib_idx].path.display());
                 self.status_message = format!("{}: {e}", self.locale.error_prefix());
             }
         }
@@ -108,9 +121,11 @@ impl App {
     pub(crate) fn toggle_pause(&mut self) {
         match self.status {
             PlayerStatus::Playing => {
+                info!("Pause");
                 self.start_fade(FadeAction::Pause, self.volume, 0.0, 250);
             }
             PlayerStatus::Paused => {
+                info!("Resume");
                 self.play_start = Some(Instant::now());
                 self.player.play();
                 self.status = PlayerStatus::Playing;
@@ -124,12 +139,16 @@ impl App {
 
     pub(crate) fn next_track(&mut self) {
         if let Some(idx) = self.compute_next_lib_index() {
+            info!("Next track: index={idx}");
             self.start_fade(FadeAction::LoadTrack(idx), self.volume, 0.0, 200);
+        } else {
+            info!("Next track: end of playlist");
         }
     }
 
     pub(crate) fn prev_track(&mut self) {
         if let Some(idx) = self.compute_prev_lib_index() {
+            info!("Previous track: index={idx}");
             self.start_fade(FadeAction::LoadTrack(idx), self.volume, 0.0, 200);
         }
     }
@@ -158,6 +177,7 @@ impl App {
     }
 
     pub(crate) fn stop(&mut self) {
+        info!("Stop requested");
         if self.status == PlayerStatus::Playing || self.status == PlayerStatus::Paused {
             self.start_fade(FadeAction::Stop, self.volume, 0.0, 200);
         } else {
@@ -169,13 +189,18 @@ impl App {
 
     pub(crate) fn advance_track(&mut self) {
         if let Some(idx) = self.compute_next_lib_index() {
+            debug!("Auto-advance to index={idx}");
             self.start_fade(FadeAction::LoadTrack(idx), self.volume, 0.0, 200);
         } else {
+            info!("End of playlist reached, stopping");
             self.start_fade(FadeAction::Stop, self.volume, 0.0, 200);
         }
     }
 
-    pub(crate) fn toggle_play_mode(&mut self) { self.play_mode = self.play_mode.next(); }
+    pub(crate) fn toggle_play_mode(&mut self) {
+        self.play_mode = self.play_mode.next();
+        info!("Play mode: {:?}", self.play_mode);
+    }
 
     pub(crate) fn volume_up(&mut self) {
         self.volume = (self.volume + 0.05).min(1.0);
@@ -200,6 +225,7 @@ impl App {
 
     pub(crate) fn seek_to(&mut self, secs: f64) {
         if self.status == PlayerStatus::Stopped || self.current_index.is_none() { return; }
+        debug!("Seek to {:.1}s", secs);
         self.fade = None;
         let lib_idx = self.current_index.unwrap();
         let seek = Duration::from_secs_f64(secs);
@@ -207,6 +233,7 @@ impl App {
         self.accumulated = seek;
         self.elapsed = seek;
         if let Err(e) = self.player.load(&self.library[lib_idx].path, seek) {
+            warn!("Seek failed: {e}");
             self.status_message = format!("{}: {e}", self.locale.seek_error());
             return;
         }

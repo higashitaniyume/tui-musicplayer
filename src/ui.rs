@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::ui_panels;
+use crate::ui_settings;
 
 const ACCENT: Color = Color::Cyan;
 const BG_DARK: Color = Color::Rgb(20, 20, 40);
@@ -36,9 +37,36 @@ pub fn render(f: &mut Frame, app: &mut App) {
     ]).split(area);
 
     render_title(f, main[0]);
-    ui_panels::render_content(f, main[1], app);
+
+    if app.show_settings {
+        ui_settings::render_settings(f, main[1], app);
+    } else {
+        ui_panels::render_content(f, main[1], app);
+    }
+
     render_player_bar(f, main[2], app);
-    render_key_hints(f, main[3], app);
+
+    // Show input bar as overlay when entering text, otherwise key hints
+    if matches!(app.input_mode, crate::app::InputMode::EnteringPath { .. }) {
+        // Overlay input bar on top of content area (bottom portion)
+        let input_area = centered_rect(main[1], 60, 5);
+        ui_settings::render_input_bar(f, input_area, app);
+        // Still render key hints area as empty to maintain layout
+        f.render_widget(
+            Paragraph::new("").block(Block::new().style(Style::new().bg(BG_HINT))),
+            main[3],
+        );
+    } else {
+        render_key_hints(f, main[3], app);
+    }
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    Rect { x, y, width: w, height: h }
 }
 
 fn render_title(f: &mut Frame, area: Rect) {
@@ -129,6 +157,32 @@ fn render_player_bar(f: &mut Frame, area: Rect, app: &mut App) {
 fn render_key_hints(f: &mut Frame, area: Rect, app: &App) {
     let loc = &app.locale;
     let hl = |s| Span::styled(s, Style::new().fg(Color::Black).bg(ACCENT));
+
+    if app.show_settings {
+        let add_label = match app.settings_section {
+            crate::app::SettingsSection::Folders => loc.settings_hint_add_folder(),
+            crate::app::SettingsSection::Playlists => loc.settings_hint_import_xspf(),
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                hl(" Tab "), Span::styled("Switch  ", normal()),
+                hl(" A "), Span::styled(add_label, normal()),
+                Span::styled("  ", dim()),
+                hl(" I "), Span::styled(loc.settings_hint_import_xspf(), normal()),
+                Span::styled("  ", dim()),
+                hl(" D "), Span::styled(loc.settings_hint_remove(), normal()),
+                Span::styled("  ", dim()),
+                hl(" L "), Span::styled(loc.language_toggle_hint(), normal()),
+                Span::styled("  ", dim()),
+                hl(" Enter "), Span::styled(loc.settings_hint_rescan(), normal()),
+                Span::styled("  ", dim()),
+                hl(" Esc "), Span::styled(loc.settings_hint_back(), normal()),
+            ])).block(Block::new().style(Style::new().bg(BG_HINT))),
+            area,
+        );
+        return;
+    }
+
     let enter_label = match app.focus {
         crate::app::Panel::Library => if matches!(loc.lang(), crate::locale::Lang::En) { "Add" } else { "添加" },
         crate::app::Panel::Playlist => if matches!(loc.lang(), crate::locale::Lang::En) { "Play" } else { "播放" },
@@ -147,6 +201,8 @@ fn render_key_hints(f: &mut Frame, area: Rect, app: &App) {
             hl(" L "), Span::styled("Library  ", normal()),
             hl(" A "), Span::styled("Add  ", normal()),
             hl(" D "), Span::styled("Del  ", normal()),
+            hl(" W "), Span::styled(loc.playlist_switch_hint(), normal()),
+            hl(" F2 "), Span::styled(loc.settings_key_hint(), normal()),
             hl(" Q "), Span::styled(loc.hint_quit(), normal()),
         ])).block(Block::new().style(Style::new().bg(BG_HINT))),
         area,

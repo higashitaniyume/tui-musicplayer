@@ -1,15 +1,104 @@
+use std::path::PathBuf;
+
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Rect;
 
-use crate::app::{move_list, select_at, App, Panel};
+use crate::app::{move_list, select_at, App, InputMode, Panel, SettingsSection};
 
 impl App {
     // ── Keyboard ──
 
     pub fn handle_key(&mut self, key: KeyEvent) {
         if key.kind == KeyEventKind::Release { return; }
+
+        // ── Text input mode ──
+        if let InputMode::EnteringPath { ref buffer, cursor, ref purpose } = self.input_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    self.input_mode = InputMode::Normal;
+                }
+                KeyCode::Enter => {
+                    let path = PathBuf::from(buffer.clone());
+                    let purpose_clone = purpose.clone();
+                    self.input_mode = InputMode::Normal;
+                    match purpose_clone {
+                        crate::app::PathPurpose::AddMusicFolder => self.add_music_folder(path),
+                        crate::app::PathPurpose::ImportXspf => self.import_xspf_file(path),
+                    }
+                }
+                KeyCode::Char(c) => {
+                    self.input_mode = InputMode::EnteringPath {
+                        buffer: {
+                            let mut b = buffer.clone();
+                            b.insert(cursor, c);
+                            b
+                        },
+                        cursor: cursor + 1,
+                        purpose: purpose.clone(),
+                    };
+                }
+                KeyCode::Backspace => {
+                    if cursor > 0 {
+                        let mut b = buffer.clone();
+                        b.remove(cursor - 1);
+                        self.input_mode = InputMode::EnteringPath {
+                            buffer: b,
+                            cursor: cursor - 1,
+                            purpose: purpose.clone(),
+                        };
+                    }
+                }
+                KeyCode::Delete => {
+                    if cursor < buffer.len() {
+                        let mut b = buffer.clone();
+                        b.remove(cursor);
+                        self.input_mode = InputMode::EnteringPath {
+                            buffer: b,
+                            cursor,
+                            purpose: purpose.clone(),
+                        };
+                    }
+                }
+                KeyCode::Left => {
+                    if cursor > 0 {
+                        self.input_mode = InputMode::EnteringPath {
+                            buffer: buffer.clone(),
+                            cursor: cursor - 1,
+                            purpose: purpose.clone(),
+                        };
+                    }
+                }
+                KeyCode::Right => {
+                    if cursor < buffer.len() {
+                        self.input_mode = InputMode::EnteringPath {
+                            buffer: buffer.clone(),
+                            cursor: cursor + 1,
+                            purpose: purpose.clone(),
+                        };
+                    }
+                }
+                KeyCode::Home => {
+                    self.input_mode = InputMode::EnteringPath {
+                        buffer: buffer.clone(),
+                        cursor: 0,
+                        purpose: purpose.clone(),
+                    };
+                }
+                KeyCode::End => {
+                    self.input_mode = InputMode::EnteringPath {
+                        buffer: buffer.clone(),
+                        cursor: buffer.len(),
+                        purpose: purpose.clone(),
+                    };
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // ── Ctrl+C ──
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             if let KeyCode::Char('c') = key.code {
                 self.request_quit();
@@ -17,15 +106,77 @@ impl App {
             return;
         }
 
+        // ── Settings mode keys ──
+        if self.show_settings {
+            match key.code {
+                KeyCode::Esc | KeyCode::F(2) => self.toggle_settings(),
+                KeyCode::Char('q') => self.request_quit(),
+                KeyCode::Tab => {
+                    self.settings_section = match self.settings_section {
+                        SettingsSection::Folders => SettingsSection::Playlists,
+                        SettingsSection::Playlists => SettingsSection::Folders,
+                    };
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    match self.settings_section {
+                        SettingsSection::Folders => move_list(
+                            &mut self.settings_folder_state,
+                            self.config.music_folders.len(),
+                            -1,
+                        ),
+                        SettingsSection::Playlists => move_list(
+                            &mut self.settings_xspf_state,
+                            self.config.xspf_playlists.len(),
+                            -1,
+                        ),
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    match self.settings_section {
+                        SettingsSection::Folders => move_list(
+                            &mut self.settings_folder_state,
+                            self.config.music_folders.len(),
+                            1,
+                        ),
+                        SettingsSection::Playlists => move_list(
+                            &mut self.settings_xspf_state,
+                            self.config.xspf_playlists.len(),
+                            1,
+                        ),
+                    }
+                }
+                KeyCode::Char('a') => {
+                    self.input_mode = InputMode::EnteringPath {
+                        buffer: String::new(),
+                        cursor: 0,
+                        purpose: crate::app::PathPurpose::AddMusicFolder,
+                    };
+                }
+                KeyCode::Char('i') => {
+                    self.input_mode = InputMode::EnteringPath {
+                        buffer: String::new(),
+                        cursor: 0,
+                        purpose: crate::app::PathPurpose::ImportXspf,
+                    };
+                }
+                KeyCode::Char('d') => self.remove_settings_item(),
+                KeyCode::Char('l') => self.toggle_language(),
+                KeyCode::Enter => self.rescan_all(),
+                _ => {}
+            }
+            return;
+        }
+
+        // ── Normal mode keys ──
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.request_quit(),
             KeyCode::Tab => self.cycle_focus(),
+            KeyCode::F(2) => self.toggle_settings(),
             KeyCode::Char('l') => {
                 self.library_visible = !self.library_visible;
                 if self.library_visible { self.focus = Panel::Library; }
                 else if self.focus == Panel::Library { self.focus = Panel::Playlist; }
             }
-            KeyCode::Char('i') => self.import_xspf_dialog(),
             KeyCode::Char('a') if self.focus == Panel::Library => self.add_selected_to_playlist(),
             KeyCode::Enter => self.handle_enter(),
             KeyCode::Char(' ') => self.toggle_pause(),
@@ -36,6 +187,7 @@ impl App {
             KeyCode::Char('+') | KeyCode::Char('=') => self.volume_up(),
             KeyCode::Char('-') => self.volume_down(),
             KeyCode::Char('d') if self.focus == Panel::Playlist => self.remove_from_playlist(),
+            KeyCode::Char('w') => self.cycle_playlist(),
             KeyCode::Up | KeyCode::Char('k') => self.move_focus_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_focus_selection(1),
             KeyCode::Left => match self.focus {
@@ -75,11 +227,13 @@ impl App {
             Panel::Library => self.add_selected_to_playlist(),
             Panel::Playlist => self.play_selected(),
             Panel::Lyrics => {
-                if let Some(idx) = self.lyrics_state.selected() {
-                    if idx < self.lyrics.len() {
-                        let secs = self.lyrics[idx].timestamp.as_secs_f64();
-                        self.seek_to(secs);
-                        self.current_lyric_index = Some(idx);
+                if let Some(phys) = self.lyrics_state.selected() {
+                    if let Some(&log) = self.lyric_line_map.get(phys) {
+                        if log < self.lyrics.len() {
+                            let secs = self.lyrics[log].timestamp.as_secs_f64();
+                            self.seek_to(secs);
+                            self.current_lyric_index = Some(log);
+                        }
                     }
                 }
             }
@@ -118,22 +272,16 @@ impl App {
     }
 
     fn move_lyrics_selection(&mut self, delta: i32) {
-        if self.lyrics.is_empty() { return; }
+        if self.lyrics.is_empty() || self.lyric_line_map.is_empty() { return; }
+        let max = self.lyric_line_map.len();
         let cur = self.lyrics_state.selected().unwrap_or(0);
         let new = if delta < 0 {
             cur.saturating_sub(delta.unsigned_abs() as usize)
         } else {
-            (cur + delta as usize).min(self.lyrics.len().saturating_sub(1))
+            (cur + delta as usize).min(max.saturating_sub(1))
         };
         self.lyrics_state.select(Some(new));
         self.lyrics_idle_ticks = 0;
-    }
-
-    fn import_xspf_dialog(&mut self) {
-        self.status_message = match self.locale.lang() {
-            crate::locale::Lang::En => "Use: tui-musicplayer playlist.xspf".into(),
-            crate::locale::Lang::ZhCn => "用法: tui-musicplayer playlist.xspf".into(),
-        };
     }
 
     // ── Mouse ──
@@ -151,6 +299,16 @@ impl App {
     }
 
     fn handle_scroll(&mut self, pos: ratatui::layout::Position, delta: i32) {
+        if self.show_settings {
+            if self.settings_folder_inner.contains(pos) {
+                self.settings_section = SettingsSection::Folders;
+                move_list(&mut self.settings_folder_state, self.config.music_folders.len(), delta);
+            } else if self.settings_xspf_inner.contains(pos) {
+                self.settings_section = SettingsSection::Playlists;
+                move_list(&mut self.settings_xspf_state, self.config.xspf_playlists.len(), delta);
+            }
+            return;
+        }
         if self.library_visible && self.library_inner.contains(pos) {
             self.focus = Panel::Library;
             move_list(&mut self.library_state, self.library.len(), delta);
@@ -164,6 +322,20 @@ impl App {
     }
 
     fn handle_click(&mut self, pos: ratatui::layout::Position) {
+        // Settings mode: only handle clicks on settings lists + progress/volume bars
+        if self.show_settings {
+            if self.settings_folder_inner.contains(pos) {
+                self.settings_section = SettingsSection::Folders;
+                select_at(&mut self.settings_folder_state, &self.settings_folder_inner, pos.y, self.config.music_folders.len());
+            } else if self.settings_xspf_inner.contains(pos) {
+                self.settings_section = SettingsSection::Playlists;
+                select_at(&mut self.settings_xspf_state, &self.settings_xspf_inner, pos.y, self.config.xspf_playlists.len());
+            }
+            // Still allow progress/volume bar interaction
+            self.handle_bar_clicks(pos);
+            return;
+        }
+
         if self.library_visible && self.library_inner.contains(pos) {
             self.focus = Panel::Library;
             select_at(&mut self.library_state, &self.library_inner, pos.y, self.library.len());
@@ -181,10 +353,15 @@ impl App {
         }
         if self.lyrics_inner.contains(pos) {
             self.focus = Panel::Lyrics;
-            select_at(&mut self.lyrics_state, &self.lyrics_inner, pos.y, self.lyrics.len());
+            let physical_len = self.lyric_line_map.len().max(1);
+            select_at(&mut self.lyrics_state, &self.lyrics_inner, pos.y, physical_len);
             self.lyrics_idle_ticks = 0;
             return;
         }
+        self.handle_bar_clicks(pos);
+    }
+
+    fn handle_bar_clicks(&mut self, pos: ratatui::layout::Position) {
         if self.progress_area != Rect::ZERO && self.progress_area.contains(pos) {
             let ratio = (pos.x.saturating_sub(self.progress_area.x)) as f64
                 / self.progress_area.width.max(1) as f64;

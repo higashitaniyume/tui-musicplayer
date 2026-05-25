@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
+use log::{debug, info};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -124,6 +125,7 @@ pub struct AudioMeta {
 // ── Directory scanning ──
 
 pub fn scan_directory(dir: &Path) -> anyhow::Result<Vec<Track>> {
+    debug!("Scanning directory: {}", dir.display());
     let mut tracks = Vec::new();
     for entry in walkdir::WalkDir::new(dir).follow_links(true) {
         let entry = entry?;
@@ -137,6 +139,7 @@ pub fn scan_directory(dir: &Path) -> anyhow::Result<Vec<Track>> {
         }
     }
     tracks.sort_by(|a, b| a.file_stem().to_lowercase().cmp(&b.file_stem().to_lowercase()));
+    debug!("Scan complete {}: {} audio files", dir.display(), tracks.len());
     Ok(tracks)
 }
 
@@ -150,12 +153,14 @@ pub fn is_audio_file(path: &Path) -> bool {
 // ── XSPF Playlist import ──
 
 pub fn parse_xspf(path: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    debug!("Parsing XSPF: {}", path.display());
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Cannot read XSPF file: {}", path.display()))?;
     let doc = roxmltree::Document::parse(&content)
         .with_context(|| format!("Invalid XML in: {}", path.display()))?;
 
     let mut files = Vec::new();
+    let mut missing = 0u32;
     for track_node in doc.descendants().filter(|n| n.has_tag_name("track")) {
         if let Some(loc) = track_node
             .descendants()
@@ -163,20 +168,34 @@ pub fn parse_xspf(path: &Path) -> anyhow::Result<Vec<PathBuf>> {
             .and_then(|n| n.text())
         {
             let loc = loc.trim();
-            // Strip file:// prefix
-            let path_str = loc
-                .strip_prefix("file://")
+            // Handle file URIs: file:///path (standard), file://path, file:path
+            let mut path_str = loc
+                .strip_prefix("file:///")
+                .or_else(|| loc.strip_prefix("file://"))
                 .or_else(|| loc.strip_prefix("file:"))
-                .unwrap_or(loc);
-            // URL-decode (basic: just %20 → space)
+                .unwrap_or(loc)
+                .to_string();
+            // Fix Windows paths like /C:/... → C:/...
+            if cfg!(windows) && path_str.len() > 3 {
+                let bytes = path_str.as_bytes();
+                if bytes[0] == b'/' && bytes[2] == b':' {
+                    path_str.remove(0);
+                }
+            }
             let path_str = path_str.replace("%20", " ");
-            let p = PathBuf::from(path_str);
+            let p = PathBuf::from(&path_str);
             if p.exists() {
                 files.push(p);
+            } else {
+                missing += 1;
+                debug!("  XSPF track not found: {}", p.display());
             }
         }
     }
 
+    if missing > 0 {
+        info!("XSPF '{}': {} tracks found, {} missing", path.display(), files.len(), missing);
+    }
     Ok(files)
 }
 
@@ -263,6 +282,7 @@ impl PlayerEngine {
     }
 
     pub fn load(&self, path: &Path, skip: Duration) -> anyhow::Result<AudioMeta> {
+        debug!("Loading audio: {} (skip={}s)", path.display(), skip.as_secs_f64());
         let file = File::open(path)
             .with_context(|| format!("Cannot open file: {}", path.display()))?;
         let reader = BufReader::new(file);
@@ -273,16 +293,35 @@ impl PlayerEngine {
             sample_rate: source.sample_rate(),
             channels: source.channels(),
         };
+        info!("Loaded: {} ({}, {:?}, {}Hz, {}ch)",
+            path.display(),
+            meta.duration.map(|d| format!("{:02}:{:02}", d.as_secs()/60, d.as_secs()%60)).unwrap_or_else(|| "?".into()),
+            path.extension().and_then(|e| e.to_str()).unwrap_or("?").to_uppercase(),
+            meta.sample_rate,
+            meta.channels,
+        );
         let source = source.skip_duration(skip);
         self.sink.append(source);
         Ok(meta)
     }
 
-    pub fn play(&self) { self.sink.play(); }
-    pub fn pause(&self) { self.sink.pause(); }
-    pub fn stop(&self) { self.sink.stop(); }
+    pub fn play(&self) {
+        debug!("Playback: play");
+        self.sink.play();
+    }
+    pub fn pause(&self) {
+        debug!("Playback: pause");
+        self.sink.pause();
+    }
+    pub fn stop(&self) {
+        debug!("Playback: stop");
+        self.sink.stop();
+    }
     pub fn is_empty(&self) -> bool { self.sink.empty() }
-    pub fn set_volume(&self, vol: f32) { self.sink.set_volume(vol.clamp(0.0, 1.0)); }
+    pub fn set_volume(&self, vol: f32) {
+        debug!("Volume: {:.0}%", vol * 100.0);
+        self.sink.set_volume(vol.clamp(0.0, 1.0));
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
