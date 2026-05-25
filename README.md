@@ -30,19 +30,31 @@ Binary will be at `target/release/tui-musicplayer` (or `target\release\tui-music
 ## Usage
 
 ```bash
-# Start with default music folder
+# Start with configured music folders
 tui-musicplayer
 
-# Start with specific files or folders
-tui-musicplayer ~/Music ~/Downloads/album.flac
+# Add a folder to the music library (persisted to config)
+tui-musicplayer --add-folder ~/Music
+tui-musicplayer --add-folder "D:\My Music"
 
-# Import an XSPF playlist at startup
-tui-musicplayer playlist.xspf
+# Import an .xspf playlist (persisted to config)
+tui-musicplayer --add-xspf ~/playlists/rock.xspf
+
+# One-time play (not saved)
+tui-musicplayer ~/Downloads/song.flac album/
+
+# Combine: add folder AND play a file
+tui-musicplayer --add-folder ~/Music song.flac
+
+# Show current config
+tui-musicplayer --list
 
 # Set language
 tui-musicplayer --lang zh
 tui-musicplayer --lang en
 ```
+
+All paths added via `--add-folder` / `--add-xspf` are canonicalized (resolved to absolute paths) before saving, so they work regardless of where you launch the app from.
 
 ## Key Bindings
 
@@ -82,7 +94,7 @@ tui-musicplayer --lang en
 | File | Path |
 |------|------|
 | Config | `%AppData%/tui-musicplayer/config.json` |
-| Log | `%AppData%/tui-musicplayer/player.log` |
+| Log | `%AppData%/tui-musicplayer/logs/player_2026-05-25_08-30-00.log` |
 
 On Linux/macOS, `%AppData%` maps to `~/.local/share/` or `~/.config/`.
 

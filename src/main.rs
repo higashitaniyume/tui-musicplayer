@@ -8,7 +8,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use log::{error, info, LevelFilter};
+use log::{error, info, warn, LevelFilter};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use simplelog::{CombinedLogger, ConfigBuilder, WriteLogger};
@@ -45,23 +45,60 @@ impl From<LangArg> for Lang {
 #[command(
     name = "tui-musicplayer",
     version,
-    about = "A cross-platform terminal music player"
+    about = "A cross-platform terminal music player",
+    long_about = "A terminal-based music player with library management, XSPF playlist support, lyrics display, and bilingual interface.\n\n\
+                  Start without arguments to load your configured music folders.\n\
+                  Use --add-folder or --add-xspf to permanently add sources to your config."
 )]
 struct Args {
-    /// Paths to audio files or directories to scan (default: configured folders or system music folder)
+    /// Audio files or directories to play (one-time, not saved to config)
     paths: Vec<PathBuf>,
 
-    /// Display language
+    /// Add a music folder to the library (persisted to config)
+    #[arg(long = "add-folder", value_name = "DIR", verbatim_doc_comment)]
+    add_folder: Vec<PathBuf>,
+
+    /// Import an .xspf playlist file (persisted to config)
+    #[arg(long = "add-xspf", value_name = "XSPF", verbatim_doc_comment)]
+    add_xspf: Vec<PathBuf>,
+
+    /// Display language (en / zh)
     #[arg(long, value_enum)]
     lang: Option<LangArg>,
+
+    /// Show current config paths and exit
+    #[arg(long)]
+    list: bool,
+}
+
+fn canonicalize_path(path: &PathBuf) -> PathBuf {
+    match std::fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(_) => {
+            // If the path doesn't exist yet, try to make it absolute
+            if path.is_relative() {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(path))
+                    .unwrap_or_else(|_| path.clone())
+            } else {
+                path.clone()
+            }
+        }
+    }
 }
 
 fn setup_logging() {
-    let log_dir = dirs::data_dir()
+    let base_dir = dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("tui-musicplayer");
+    let log_dir = base_dir.join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join("player.log");
+
+    let ts = time::OffsetDateTime::now_local()
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+        .format(&time::format_description::parse("[year]-[month]-[day]_[hour]-[minute]-[second]").unwrap())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let log_path = log_dir.join(format!("player_{ts}.log"));
 
     let config = ConfigBuilder::new()
         .set_time_format_rfc3339()
@@ -70,6 +107,30 @@ fn setup_logging() {
     let _ = CombinedLogger::init(vec![
         WriteLogger::new(LevelFilter::Debug, config, std::fs::File::create(&log_path).unwrap()),
     ]);
+    eprintln!("Log: {}", log_path.display());
+}
+
+fn print_config(config: &Config) {
+    println!("tui-musicplayer config");
+    println!("  config path: {}", config_path_display());
+    println!("  language: {}", config.language.as_deref().unwrap_or("auto"));
+    println!("  music folders ({}):", config.music_folders.len());
+    for (i, folder) in config.music_folders.iter().enumerate() {
+        println!("    [{i}] {}", folder.display());
+    }
+    println!("  xspf playlists ({}):", config.xspf_playlists.len());
+    for (i, xspf) in config.xspf_playlists.iter().enumerate() {
+        println!("    [{i}] {}", xspf.display());
+    }
+}
+
+fn config_path_display() -> String {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("tui-musicplayer")
+        .join("config.json")
+        .display()
+        .to_string()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -77,7 +138,48 @@ fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let config = Config::load();
+    // ── --list: print config and exit ──
+    if args.list {
+        let config = Config::load();
+        print_config(&config);
+        return Ok(());
+    }
+
+    let mut config = Config::load();
+
+    // ── --add-folder: persist folder paths to config ──
+    let mut config_changed = false;
+    for folder in &args.add_folder {
+        let canonical = canonicalize_path(folder);
+        if config.music_folders.iter().any(|f| f == &canonical) {
+            info!("Folder already in config: {}", canonical.display());
+        } else {
+            info!("Adding folder to config: {} (from {})", canonical.display(), folder.display());
+            config.music_folders.push(canonical);
+            config_changed = true;
+        }
+    }
+
+    // ── --add-xspf: persist XSPF paths to config ──
+    for xspf in &args.add_xspf {
+        let canonical = canonicalize_path(xspf);
+        if config.xspf_playlists.iter().any(|p| p == &canonical) {
+            info!("XSPF already in config: {}", canonical.display());
+        } else {
+            info!("Adding XSPF to config: {} (from {})", canonical.display(), xspf.display());
+            config.xspf_playlists.push(canonical);
+            config_changed = true;
+        }
+    }
+
+    if config_changed {
+        if let Err(e) = config.save() {
+            warn!("Failed to save config: {e}");
+        } else {
+            eprintln!("Config updated: {} folders, {} xspf playlists",
+                config.music_folders.len(), config.xspf_playlists.len());
+        }
+    }
 
     // Language priority: CLI --lang > config file > auto-detect (default Chinese)
     let locale = args

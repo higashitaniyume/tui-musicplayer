@@ -391,6 +391,7 @@ impl App {
     }
 
     pub fn add_music_folder(&mut self, path: PathBuf) {
+        let path = canonicalize_path(&path);
         info!("Adding music folder: {}", path.display());
         if !path.is_dir() {
             warn!("Path is not a directory: {}", path.display());
@@ -420,6 +421,7 @@ impl App {
     }
 
     pub fn import_xspf_file(&mut self, path: PathBuf) {
+        let path = canonicalize_path(&path);
         info!("Importing XSPF: {}", path.display());
         if path.extension().map(|e| e != "xspf").unwrap_or(true) {
             warn!("Not an .xspf file: {}", path.display());
@@ -671,4 +673,19 @@ fn system_music_dir() -> PathBuf {
         }
     }
     PathBuf::from(".")
+}
+
+fn canonicalize_path(path: &PathBuf) -> PathBuf {
+    match std::fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(_) => {
+            if path.is_relative() {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(path))
+                    .unwrap_or_else(|_| path.clone())
+            } else {
+                path.clone()
+            }
+        }
+    }
 }
